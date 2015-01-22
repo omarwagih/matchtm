@@ -40,13 +40,12 @@ computeBits <- function(pwm, N=4){
 
 
 getPriors <- function(priors='eq', seq.type='DNA', N=4){
-  
   namespace = get(seq.type)
   # If priors is equiprobable
-  if(priors == 'eq'){
+  if(priors[1] == 'eq'){
     priors = rep(1/N, N)
     names(priors) = namespace
-  }else if(is.character(priors)){
+  }else if(is.character(priors[1])){
     organism = priors[1]
     priors.list = get(sprintf('%s_PRIORS', seq.type))
     if(! organism %in% names(priors.list)) stop('Could not find organism in priors!')
