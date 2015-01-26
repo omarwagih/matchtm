@@ -88,6 +88,9 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   if(!all(is.character(input)) & !is.matrix(input) ) stop('Input must be char vector or a matrix!')
   no.pfm = all(is.character(input))
   
+  # We dont need pseudocounts if we're not logging!
+  if(log.bg) pseudocount = 0
+  
   # Ensure seq.type is correct
   if(!seq.type %in% c('AA', 'DNA', 'auto')) stop('seq.type must be AA, DNA, or auto')
   
@@ -255,6 +258,16 @@ logScore <- function(seqs, pwm, na.rm=F, ignore.central=F){
 }
 
 
+## a useful function: rev() for strings
+strReverse <- function(x){
+  sapply(lapply(strsplit(x, NULL), rev), paste, collapse="")
+}
+
+revComp <- function(seqs){
+  cseqs = chartr("ATGCatgc","TACGtacg",seqs)
+  strReverse(cseqs)
+}
+
 #' Compute matrix similarity score as described in MATCH algorithm
 #' 
 #' Computes score of a PWM with a k-mer.
@@ -268,12 +281,12 @@ logScore <- function(seqs, pwm, na.rm=F, ignore.central=F){
 #' @param kinase.pwm TRUE if PWM is that of a kinase (special case). If you have DNA sequences, this will be automatically set to FALSE.
 #' @param na.rm Remove NA scores?
 #' @param ignore.central Ignore central residue, for things like PTMs where you want to ignore the weight of the modified site
-#'  
+#' @param both.strands If you are scoring DNA sequences, the method will score both the sequence and the reverse compliment (reverse strand). If you want the forward strand only (i.e. the input), set to FALSE. Default is TRUE.
 #'  
 #' @keywords pwm mss match tfbs log pfm
 #' @examples
 #' # No Examples
-scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.central=F){
+scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.central=F, both.strands=T){
   
   if(attr(pwm, 'seq.type') != 'AA') kinase.pwm = F
   
@@ -345,5 +358,13 @@ scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.cent
   # Remove NA if requested
   if(na.rm) scores = scores[!is.na(scores)]
   
+  
+  # Do reverse strands
+  if(attr(pwm, 'seq.type') == 'DNA' & both.strands){
+    rc = revComp(seqs)
+    li.scores = list('+' = scores, 
+                     '-'=scorePWM(rc, pwm , method, kinase.pwm, na.rm, ignore.central, both.strands = F))
+    return(li.scores)
+  }
   return(scores)
 }
