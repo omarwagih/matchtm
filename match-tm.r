@@ -89,7 +89,7 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   no.pfm = all(is.character(input))
   
   # We dont need pseudocounts if we're not logging!
-  if(log.bg) pseudocount = 0
+  if(!log.bg) pseudocount = 0
   
   # Ensure seq.type is correct
   if(!seq.type %in% c('AA', 'DNA', 'auto')) stop('seq.type must be AA, DNA, or auto')
@@ -163,7 +163,7 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   attr(pwm.matrix, 'bits') = computeBits(pwm.matrix, N)
   
   # If log.bg, compute weights as log(fij/bi)
-  if(log.bg) pwm.matrix = apply(pwm.matrix, 2, function(col) log(col / bg.prob))
+  if(log.bg) pwm.matrix = apply(pwm.matrix, 2, function(col) log2(col / bg.prob))
   
   # Assign AA names to rows/pos col
   rownames(pwm.matrix) = namespace
