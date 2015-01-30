@@ -105,7 +105,7 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
     # Split into individual letters
     split = unlist( sapply(input, function(seq){strsplit(seq, '')}) )
   }else{
-    num.pos = ncol(pfm)
+    num.pos = ncol(input)
     split = rownames(input)
   }
   
@@ -125,7 +125,7 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   if(no.pfm){
     m = t( matrix(split, seq.len, length(split)/num.pos) )
   }else{
-    m = pfm
+    m = input
   }
   
   # Construct PWM
