@@ -1,12 +1,13 @@
 #' MATCH-TM Implemntation + Log weights score
 #' @author omarwagih
 #' @references pubmed:12824369
+require(parallel)
 
 
 #' Namespaces
 AA = c('A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V')
-DNA = c('A', 'T', 'G', 'C')
-RNA = c('A', 'U', 'G', 'C')
+DNA = c('A', 'C', 'G', 'T')
+RNA = c('A', 'C', 'G', 'U')
 
 #' Priors for amino acids and dna
 AA_PRIORS  =   list(human = c(A=0.070, R=0.056, N=0.036, D=0.048,C=0.023,
@@ -29,15 +30,15 @@ DNA_PRIORS =   list(human = c(A=0.293, C=0.207, G=0.200, T=0.300),
 #' 
 #' @param pwm position weight matrix containing relation freqiences
 #' @param N number of letters (20 for AA, 4 for DNA/RNA)
-computeBits <- function(pwm, N=4){
+#' @param Nseqs number of sequences in the alignment
+computeBits <- function(pwm, N=4, Nseqs){
   H_i = - apply(pwm, 2, function(col) sum(col * log2(col), na.rm=T))
-  e_n = (1/logb(2)) * (N-1)/(2*N) 
-  R_i = log2(N) - (H_i + e_n)
+  e_n = (1/logb(2)) * (N-1)/(2*Nseqs) 
+  R_i = log2(N) - (H_i  + e_n)
   # Set any negatives to 0
   R_i = pmax(R_i, 0)
   return(R_i)
 }
-
 
 getPriors <- function(priors='eq', seq.type='DNA', N=4){
   namespace = get(seq.type)
@@ -70,6 +71,37 @@ findNamespace <- function(seq.type, sp){
   
 }
 
+
+# Get first consecutive x highest conservation 
+coreIndicies <- function(ic, core=5){
+  # Get possible start indices
+  starts = 1:(length(ic)-core+1)
+  # Get indicies of length core
+  cons_index = lapply(starts, function(s)  s:(s+core-1))
+  # Compute conservation for these streches 
+  cons = sapply(cons_index, function(ind) sum(ic[ind]) )
+  # Find best set
+  p = cons_index[[which.max(cons)]]
+  
+  p
+}
+
+
+
+letterMatrix <- function(input){
+  # Ensure kmers are the same length characters 
+  seq.len = sapply(input, nchar)
+  num.pos = seq.len[1]
+  if(! all(seq.len == num.pos)) stop('Unequal length of sequences')
+  
+  # Construct matrix of letters
+  split = unlist( sapply(input, function(seq){strsplit(seq, '')}) )
+  
+  m = t( matrix(split, seq.len, length(split)/num.pos) )
+  m
+}
+
+
 #' Construct position weight matrix
 #' 
 #' Makes a position weight matrix given aligned sequences.
@@ -84,7 +116,7 @@ findNamespace <- function(seq.type, sp){
 #' @export
 #' @examples
 #' # No examples
-makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.bg=F, priors='eq'){
+makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.bg=F, priors='eq', core=5){
   if(!all(is.character(input)) & !is.matrix(input) ) stop('Input must be char vector or a matrix!')
   no.pfm = all(is.character(input))
   
@@ -95,18 +127,15 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   if(!seq.type %in% c('AA', 'DNA', 'auto')) stop('seq.type must be AA, DNA, or auto')
   
   if(no.pfm){
-    # Ensure kmers are the same length characters 
-    seq.len = sapply(input, nchar)
-    num.pos = seq.len[1]
-    if(! all(seq.len == num.pos)) stop('Unequal length of sequences')
-    
-    # Construct matrix of letters
-    
-    # Split into individual letters
-    split = unlist( sapply(input, function(seq){strsplit(seq, '')}) )
+    num.pos = nchar(input[1])
+    m = letterMatrix(input)
+    split = as.character(m)
+    nseqs = length(input)
   }else{
     num.pos = ncol(input)
     split = rownames(input)
+    nseqs = max(apply(input, 2, sum))
+    m = input
   }
   
   # Chose correct namespace
@@ -120,22 +149,13 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   my.priors = getPriors(priors, seq.type, N)
   
   # Match priors to namespace 
-  bg.prob = priors[match(namespace, names(my.priors))]
-  
-  if(no.pfm){
-    m = t( matrix(split, seq.len, length(split)/num.pos) )
-  }else{
-    m = input
-  }
-  
+  bg.prob = my.priors[match(namespace, names(my.priors))]
   # Construct PWM
   pwm.matrix = apply(m, 2, function(pos.data){
+    
+    t = pos.data
     # Get frequencies 
-    if(no.pfm){
-      t = table(pos.data)
-    }else{
-      t = pos.data
-    }
+    if(no.pfm) t = table(pos.data)
     
     # Match to aa
     ind = match(namespace, names(t))
@@ -146,7 +166,9 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
     names(col) = namespace
     
     # Do pseudocounts
-    col = col + (pseudocount / N) 
+    #if(log.bg) col = col + (pseudocount / N) 
+    #if(log.bg) col = col + bg.prob
+    if(log.bg) col = col + (sqrt(nseqs) * bg.prob)
     
     # Do relative frequencies
     if(relative.freq) col = col / sum(col)
@@ -160,16 +182,22 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
   # Information vector as computed by MATCH paper
   match.ic = apply(pwm.matrix, 2, function(col) sum(col * logb(N * col), na.rm=T))
   attr(pwm.matrix, 'match.ic') = match.ic
-  attr(pwm.matrix, 'bits') = computeBits(pwm.matrix, N)
+  attr(pwm.matrix, 'bits') = computeBits(pwm.matrix, N, nseqs)
   
   # If log.bg, compute weights as log(fij/bi)
   if(log.bg) pwm.matrix = apply(pwm.matrix, 2, function(col) log2(col / bg.prob))
+  #if(log.bg) pwm.matrix = apply(pwm.matrix, 2, function(col) log2(col / 0.25))
   
   # Assign AA names to rows/pos col
   rownames(pwm.matrix) = namespace
   colnames(pwm.matrix) = 1:num.pos
   attr(pwm.matrix, 'log.bg') = log.bg
   attr(pwm.matrix, 'seq.type') = seq.type
+  
+  core = pmin(core, ncol(pwm.matrix))
+  if(!is.na(core))
+    attr(pwm.matrix, 'core') = coreIndicies(match.ic, core)
+  
   
   return(pwm.matrix)
 }
@@ -244,7 +272,9 @@ worstSequence <- function(pwm){
 #' @keywords pwm log
 #' @examples
 #' # No Examples
-logScore <- function(seqs, pwm, na.rm=F, ignore.central=F){
+logScore <- function(seqs, pwm, na.rm=F, ignore.central=F, relative=T){
+  
+  seqs = c(bestSequence(pwm), worstSequence(pwm), seqs)
   if(ignore.central){
     # Central residue index
     central.ind = ceiling(ncol(pwm)/2)
@@ -252,6 +282,15 @@ logScore <- function(seqs, pwm, na.rm=F, ignore.central=F){
   }else{
     scores = sapply(scoreArray(seqs, pwm), function(sa) sum(sa, na.rm=T))
   }
+  
+  max.score = scores[1]
+  min.score = scores[2]
+  scores = scores[-(1:2)]
+  if(relative){
+    # (site_score - min_matrix_score) / (max_matrix_score - min_matrix_score)
+    scores = (scores - min.score)/(max.score - min.score)
+  }
+  
   # Remove NA if requested
   if(na.rm) scores = scores[!is.na(scores)]
   return(scores)
@@ -263,9 +302,12 @@ strReverse <- function(x){
   sapply(lapply(strsplit(x, NULL), rev), paste, collapse="")
 }
 
-revComp <- function(seqs){
-  cseqs = chartr("ATGCatgc","TACGtacg",seqs)
-  strReverse(cseqs)
+revComp <- function(seqs, rev=T, comp=T){
+  if(nchar(seqs[1]) == 1) warning('Reverse compliment wont work on split sequence!')
+  cseqs = seqs
+  if(comp) cseqs = chartr("ATGCatgc","TACGtacg",seqs)
+  if(rev) cseqs = strReverse(cseqs)
+  cseqs
 }
 
 #' Compute matrix similarity score as described in MATCH algorithm
@@ -277,7 +319,6 @@ revComp <- function(seqs){
 #'
 #' @param seqs Sequences to be scored
 #' @param pwm Position weight matrix
-#' @param method which method to use, "mss" for Matrix Similarity Score, "log" for sum of log weights
 #' @param kinase.pwm TRUE if PWM is that of a kinase (special case). If you have DNA sequences, this will be automatically set to FALSE.
 #' @param na.rm Remove NA scores?
 #' @param ignore.central Ignore central residue, for things like PTMs where you want to ignore the weight of the modified site
@@ -286,12 +327,9 @@ revComp <- function(seqs){
 #' @keywords pwm mss match tfbs log pfm
 #' @examples
 #' # No Examples
-scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.central=F, both.strands=T){
+matchScore <- function(seqs, pwm, kinase.pwm=T, na.rm=F, ignore.central=F, both.strands=F){
   
   if(attr(pwm, 'seq.type') != 'AA') kinase.pwm = F
-  
-  # Check for correct method
-  if(!method %in% c('mss', 'log')) stop('Method must be "mss" or "log"') 
   
   # Must ignore central for kinase pwms
   if(kinase.pwm) ignore.central = T
@@ -299,47 +337,47 @@ scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.cent
   # Central residue index
   central.ind = ceiling(ncol(pwm)/2)
   
-  
-  if(method == "log"){
-    if(!attr(pwm, 'log.bg')) 
-      stop('Must have log weights for log method, please reconstruct the pwm with log.bg=TRUE')
-    
-    # Get log scores
-    scores = logScore(seqs = seqs, pwm = pwm, na.rm = na.rm, ignore.central = ignore.central) 
-  }
-  if(method == "mss"){
-    
-    # Cannot have log weights for mss
-    if(attr(pwm, 'log.bg')) 
+  # Cannot have log weights for mss
+  if(attr(pwm, 'log.bg')) 
       stop('Cannot have log weights for MSS, please reconstruct the pwm with log.bg=FALSE')
     
     
-    # Best/worst sequence match
-    oa = scoreArray(bestSequence(pwm), pwm)[[1]]
-    wa = scoreArray(worstSequence(pwm), pwm)[[1]]
+  # Best/worst sequence match
+  oa = scoreArray(bestSequence(pwm), pwm)[[1]]
+  wa = scoreArray(worstSequence(pwm), pwm)[[1]]
     
-    # MATCH information content
-    I = attr(pwm, 'match.ic')
+  # MATCH information content
+  IC = attr(pwm, 'match.ic')
     
-    # Get vector of frequencies 
-    score.arr = scoreArray(seqs, pwm)
+  # Get vector of frequencies 
+  score.arr = scoreArray(seqs, pwm)
     
-    scores = sapply(score.arr, function(sa){
-      na = is.na(sa)
-      na[central.ind] = ignore.central
-      
-      # Get information content of non-NA values
-      IC = I[!na]
-      
-      # MSS score core
-      curr.score  = sum( IC * (sa [!na]), na.rm=T ) 
-      opt.score   = sum( IC * (oa [!na]), na.rm=T )
-      worst.score = sum( IC * (wa [!na]), na.rm=T )
-      score.final = ( (curr.score - worst.score) / (opt.score - worst.score) )
-      score.final
-    })
-    
+  mssHelper <- function(sa, wa, oa, IC){
+    curr.score  = sum( IC * sa, na.rm=T ) 
+    opt.score   = sum( IC * oa, na.rm=T )
+    worst.score = sum( IC * wa, na.rm=T )
+    score.final = ( (curr.score - worst.score) / (opt.score - worst.score) )
+    score.final
   }
+    
+  # Get core indicies
+  core.ind = attr(pwm, 'core')
+  if(ignore.central) core.ind = setdiff(core.ind, central.ind)
+    
+  scores = lapply(score.arr, function(sa){
+    na = is.na(sa)
+    na[central.ind] = ignore.central
+    keep = !na
+    
+    mss.score = mssHelper(sa[keep], wa[keep], oa[keep], IC[keep])
+    css.score = mssHelper(sa[core.ind], wa[core.ind], oa[core.ind], IC[core.ind])
+    
+    c(mss=mss.score, css=css.score)
+  })
+    
+  scores.mss = sapply(scores, function(i) i[[1]])
+  scores.css = sapply(scores, function(i) i[[2]])
+  
   
   # Only score sequences which have a central residue S/T or Y depending on the PWM
   central.res = '*'
@@ -352,19 +390,25 @@ scorePWM <- function(seqs, pwm, method="mss", kinase.pwm=T, na.rm=F, ignore.cent
   # Set scores to NA for kinase stuff
   if(central.res != '*'){
     keep = grepl(central.res, substr(seqs, central.ind, central.ind))
-    scores[!keep] = NA
+    scores.mss[!keep] = NA
+    scores.css[!keep] = NA
   }
   
   # Remove NA if requested
-  if(na.rm) scores = scores[!is.na(scores)]
+  if(na.rm){
+    scores.mss = scores.mss[!is.na(scores.mss)]
+    scores.css = scores.css[!is.na(scores.css)]
+  }
   
-  
+  scores = list(mss=scores.mss, css=scores.css)
   # Do reverse strands
   if(attr(pwm, 'seq.type') == 'DNA' & both.strands){
     rc = revComp(seqs)
     li.scores = list('+' = scores, 
-                     '-'=scorePWM(rc, pwm , method, kinase.pwm, na.rm, ignore.central, both.strands = F))
+                     '-' = matchScore(rc, pwm, kinase.pwm, na.rm, ignore.central, both.strands = F))
     return(li.scores)
   }
+  
   return(scores)
 }
+
