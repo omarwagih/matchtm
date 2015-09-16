@@ -16,7 +16,7 @@ dna.seqs = readLines('sample_dna.txt')
 dna.pwm = makePWM(dna.seqs, log.bg = F, priors = 'ecoli', seq.type = 'auto')
 
 # Score some DNA sequences (can change method to "log")
-dna.scores = scorePWM(dna.seqs, dna.pwm, method = 'mss')
+dna.scores = matchScore(dna.seqs, dna.pwm)$mss
 # print(dna.scores)
 
 ###############################
@@ -31,7 +31,7 @@ aa.seqs = readLines('sample_aa.txt')
 aa.pwm = makePWM(aa.seqs, log.bg = F, priors = 'yeast', seq.type = 'auto')
 
 # Score some DNA sequences (can change method to "log")
-aa.scores = scorePWM(aa.seqs, aa.pwm, method = 'mss')
+aa.scores = matchScore(aa.seqs, aa.pwm)$mss
 # print(aa.scores)
 
 ###############################
@@ -46,6 +46,6 @@ pfm = as.matrix( read.table('sample_pfm.txt') )
 my.pwm = makePWM(pfm, log.bg = F, priors = 'ecoli', seq.type = 'auto')
 
 # Score some DNA sequences (can change method to "log")
-pfm.scores = scorePWM('TGGCA', my.pwm, method = 'mss')
+pfm.scores = matchScore('TGGCA', my.pwm)$mss
 # print(pfm.scores)
 

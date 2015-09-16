@@ -168,8 +168,8 @@ makePWM <- function(input, pseudocount=1, relative.freq=T, seq.type='auto', log.
     
     # Do pseudocounts
     #if(log.bg) col = col + (pseudocount / N) 
-    #if(log.bg) col = col + bg.prob
-    if(log.bg) col = col + (sqrt(nseqs) * bg.prob)
+    if(log.bg) col = col + bg.prob
+    #if(log.bg) col = col + (sqrt(nseqs) * bg.prob)
     
     # Do relative frequencies
     if(relative.freq) col = col / sum(col)
